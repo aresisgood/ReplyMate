@@ -114,4 +114,10 @@ describe("ChatApp — 初次載入", () => {
     render(<ChatApp me={ME} initialConversations={conversations()} />);
     expect(await screen.findByText("報告進度如何？")).toBeInTheDocument();
   });
+
+  it("header 有通往 /settings 的設定連結", () => {
+    render(<ChatApp me={ME} initialConversations={conversations()} />);
+    const link = screen.getByRole("link", { name: "設定" });
+    expect(link).toHaveAttribute("href", "/settings");
+  });
 });
