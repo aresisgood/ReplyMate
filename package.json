@@ -1,0 +1,40 @@
+{
+  "name": "reply-mate",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "db:push": "drizzle-kit push",
+    "db:seed": "tsx scripts/seed.ts",
+    "db:reset": "node -e \"for (const f of ['dev.db','dev.db-wal','dev.db-shm']) try { require('fs').unlinkSync(f) } catch {}\" && npm run db:push && npm run db:seed",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.110.0",
+    "bcryptjs": "^3.0.2",
+    "better-sqlite3": "^12.11.1",
+    "drizzle-orm": "^0.45.2",
+    "next": "^15.3.4",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.10",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.15.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitest/coverage-v8": "^3.2.7",
+    "drizzle-kit": "^0.31.10",
+    "jsdom": "^29.1.1",
+    "tailwindcss": "^4.1.10",
+    "tsx": "^4.20.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.0"
+  }
+}
