@@ -4,6 +4,7 @@
 // + AI 協助草稿卡（F1）+ 自動回覆開關（F4）。
 // 輪詢游標與訊息合併的純邏輯抽到 lib/chat/timeline.ts（見該檔說明游標語意）。
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { advanceCursor, mergeById, type TimelineMessage } from "@/lib/chat/timeline";
 
@@ -259,12 +260,20 @@ export default function ChatApp({ me, initialConversations }: Props) {
             <p className="text-sm font-semibold">{me.displayName}</p>
             <p className="text-xs text-gray-400">ReplyMate</p>
           </div>
-          <button
-            onClick={handleLogout}
-            className="rounded px-2 py-1 text-xs text-gray-500 hover:bg-gray-100"
-          >
-            登出
-          </button>
+          <div className="flex items-center gap-1">
+            <Link
+              href="/settings"
+              className="rounded px-2 py-1 text-xs text-gray-500 hover:bg-gray-100"
+            >
+              設定
+            </Link>
+            <button
+              onClick={handleLogout}
+              className="rounded px-2 py-1 text-xs text-gray-500 hover:bg-gray-100"
+            >
+              登出
+            </button>
+          </div>
         </div>
         <ul className="flex-1 overflow-y-auto">
           {conversations.map((c) => (
