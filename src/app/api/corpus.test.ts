@@ -117,6 +117,18 @@ describe("POST /api/corpus/upload", () => {
     expect(res.status).toBe(413);
   });
 
+  it("request body 超過位元組上限：413（在解析 JSON 之前就擋下）", async () => {
+    // 9 MiB > 8 MiB 上限；fileText 的字元檢查根本輪不到就已回 413
+    const res = await uploadRoute.POST(
+      jsonRequest(
+        "/api/corpus/upload",
+        { fileText: "a".repeat(9 * 1024 * 1024), contactLabel: "主管" },
+        cookie
+      )
+    );
+    expect(res.status).toBe(413);
+  });
+
   it("格式無法辨識：400 + { error }", async () => {
     const res = await uploadRoute.POST(
       jsonRequest("/api/corpus/upload", { fileText: "不是匯出檔", contactLabel: "主管" }, cookie)

@@ -5,6 +5,8 @@ import { NextResponse, after, type NextRequest } from "next/server";
 import { getSessionUserId } from "./auth/cookie";
 import { ForbiddenError, NotFoundError, ValidationError } from "./chat/queries";
 
+export class PayloadTooLargeError extends Error {}
+
 // 取出登入 userId；未登入回 401 response。呼叫端樣式：
 //   const auth = requireUser(request);
 //   if (auth instanceof NextResponse) return auth;
@@ -13,6 +15,42 @@ export function requireUser(request: NextRequest): string | NextResponse {
   const userId = getSessionUserId(request);
   if (!userId) return NextResponse.json({ error: "未登入" }, { status: 401 });
   return userId;
+}
+
+// 讀取 JSON body，但在超過 maxBytes 時中止——`request.json()` 會先把整個 body
+// 讀進記憶體，等到 handler 檢查大小時，記憶體已經被吃掉了。Next.js 的 route
+// handler 沒有預設的 body 大小上限（bodySizeLimit 只作用於 Server Actions），
+// 所以這道界限得自己畫。
+//
+// 兩條防線：
+// - content-length：宣告即超量者直接拒絕，連讀都不讀。
+// - 串流累計位元組：chunked 請求沒有 content-length，標頭檢查對它無效；
+//   逐塊累加並在越界的當下 cancel，讀進來的量因此有硬上限。
+// 以位元組（非字元）計量——一個中文字在 UTF-8 是 3 bytes，用字元數會低估。
+export async function readJsonWithLimit(request: NextRequest, maxBytes: number): Promise<unknown> {
+  const declared = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    throw new PayloadTooLargeError(`body 宣告 ${declared} bytes，超過上限 ${maxBytes}`);
+  }
+
+  const reader = request.body?.getReader();
+  // 無 body 與壞 body 同樣是「請求格式錯誤」，交給呼叫端一併映射為 400。
+  if (!reader) throw new SyntaxError("request body 為空");
+
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel();
+      throw new PayloadTooLargeError(`body 超過上限 ${maxBytes} bytes`);
+    }
+    chunks.push(value);
+  }
+
+  return JSON.parse(new TextDecoder().decode(Buffer.concat(chunks)));
 }
 
 // 型別化聊天錯誤 → HTTP status。使用者可修正的錯誤回其訊息；未知內部錯誤
