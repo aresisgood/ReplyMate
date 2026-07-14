@@ -2,6 +2,9 @@ node_modules/
 .next/
 coverage/
 next-env.d.ts
+# tsc --noEmit 的增量編譯快取（tsconfig 的 incremental: true）；每次執行內容都不同，
+# 進版控只會製造分支間的 add/add 衝突。
+tsconfig.tsbuildinfo
 dev.db
 dev.db-wal
 dev.db-shm
