@@ -66,7 +66,8 @@ beforeAll(async () => {
   migrate(db, { migrationsFolder: "drizzle" });
 
   const passwordHash = await bcrypt.hash("demo1234", 4);
-  const [me, boss, outsider] = db
+  // 路人（outsider）不取 id：只用來以 outsiderCookie 驗證「非參與者」的 403 路徑
+  const [me, boss] = db
     .insert(schema.users)
     .values([
       { username: "tingyu", passwordHash, displayName: "賴庭右" },

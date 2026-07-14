@@ -35,7 +35,6 @@ let db: ReturnType<typeof drizzle<typeof schema>>;
 let sqlite: Database.Database;
 let meId: string;
 let bossId: string;
-let outsiderId: string;
 let convId: string;
 let incomingId: string; // boss 傳給我的訊息
 let myMessageId: string;
@@ -72,7 +71,8 @@ beforeAll(async () => {
   migrate(db, { migrationsFolder: "drizzle" });
 
   const passwordHash = await bcrypt.hash("demo1234", 4);
-  const [me, boss, outsider] = db
+  // 路人（outsider）不取 id：只用來以 outsiderCookie 驗證「非參與者」的 403 路徑
+  const [me, boss] = db
     .insert(schema.users)
     .values([
       { username: "tingyu", passwordHash, displayName: "賴庭右" },
@@ -83,7 +83,6 @@ beforeAll(async () => {
     .all();
   meId = me.id;
   bossId = boss.id;
-  outsiderId = outsider.id;
 
   convId = db
     .insert(schema.conversations)

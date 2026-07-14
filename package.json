@@ -9,7 +9,9 @@
     "db:push": "drizzle-kit push",
     "db:seed": "tsx scripts/seed.ts",
     "db:reset": "node -e \"for (const f of ['dev.db','dev.db-wal','dev.db-shm']) try { require('fs').unlinkSync(f) } catch {}\" && npm run db:push && npm run db:seed",
-    "test": "vitest run"
+    "test": "vitest run",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
@@ -21,6 +23,7 @@
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "^3.3.6",
     "@tailwindcss/postcss": "^4.1.10",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
@@ -31,6 +34,8 @@
     "@types/react-dom": "^19.1.0",
     "@vitest/coverage-v8": "^3.2.7",
     "drizzle-kit": "^0.31.10",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^15.5.20",
     "jsdom": "^29.1.1",
     "tailwindcss": "^4.1.10",
     "tsx": "^4.20.0",
