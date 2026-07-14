@@ -74,6 +74,8 @@ export function createRateLimiter({ limit, windowMs }: RateLimiterOptions): Rate
 // 全域限流器實例（各端點共用；測試以 resetRateLimiters 清空）
 export const draftRateLimiter = createRateLimiter({ limit: 5, windowMs: 60_000 });
 export const autoReplyRateLimiter = createRateLimiter({ limit: 1, windowMs: 10_000 });
+// 語料上傳：解析為 CPU 密集操作（非付費呼叫，但大檔可拖垮單機 Demo）
+export const corpusUploadRateLimiter = createRateLimiter({ limit: 5, windowMs: 60_000 });
 
 // 登入採雙層限流：
 // - 依帳號：擋單一帳號的密碼爆破。成功登入會歸還額度，正常使用者不會因為
@@ -89,4 +91,5 @@ export function resetRateLimiters(): void {
   loginRateLimiter.reset();
   loginIpRateLimiter.reset();
   autoReplyRateLimiter.reset();
+  corpusUploadRateLimiter.reset();
 }
