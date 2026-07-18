@@ -5,7 +5,6 @@ import { db } from "@/lib/db";
 import { openSession } from "@/lib/auth/session";
 import { SESSION_COOKIE } from "@/lib/auth/cookie";
 import { listCorpora } from "@/lib/corpus/corpus";
-import { listConversations } from "@/lib/chat/queries";
 import SettingsApp from "./SettingsApp";
 
 export const dynamic = "force-dynamic";
@@ -15,10 +14,5 @@ export default async function SettingsPage() {
   const userId = token ? openSession(token) : null;
   if (!userId) redirect("/login");
 
-  return (
-    <SettingsApp
-      initialCorpora={listCorpora(db, userId)}
-      counterpartNames={listConversations(db, userId).map((c) => c.counterpartName)}
-    />
-  );
+  return <SettingsApp initialCorpora={listCorpora(db, userId)} />;
 }
