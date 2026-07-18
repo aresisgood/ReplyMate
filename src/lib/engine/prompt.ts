@@ -12,7 +12,6 @@ export interface ConversationTurn {
 
 export interface BuildPromptInput {
   displayName: string;
-  contactLabel: string;
   styleSamples: string[]; // 已由 retrieval 選出，8–15 句
   recentTurns: ConversationTurn[]; // 對話近況，時間升冪（最舊在前）
   incomingText: string; // 對方剛傳來、要回覆的訊息
@@ -48,7 +47,7 @@ function neutralizeDelimiters(text: string): string {
 
 function buildSystem(input: BuildPromptInput, displayName: string): string {
   const parts = [
-    `你是 ${displayName} 本人。以下是你過去對「${input.contactLabel}」類型對象的真實訊息範例，` +
+    `你是 ${displayName} 本人。以下是你過去傳過的真實訊息範例，` +
       `請嚴格模仿其語氣、用詞、標點習慣與訊息長度。`,
   ];
 
