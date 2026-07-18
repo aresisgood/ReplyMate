@@ -4,7 +4,7 @@
 // （conversationSettings.styleCategoryId），null = 通用 = 合併全部語料。
 // 取出樣本後交 retrieval 分層抽樣；無樣本不阻擋（架構 §6 品質降級）。
 
-import { and, desc, eq, lt } from "drizzle-orm";
+import { and, desc, eq, lt, sql } from "drizzle-orm";
 import {
   conversations,
   conversationSettings,
@@ -20,9 +20,39 @@ import { ForbiddenError, NotFoundError } from "./queries";
 
 export const RECENT_TURNS = 6; // 架構 §6：對話最近 N=6 則
 
+// 樣本池上限：retrieval 只需 8–15 句 few-shot，全載大語料進記憶體是浪費。
+// 以 SQL random() 抽樣保留統計上的長短分布，再交分層抽樣精選。
+export const MAX_SAMPLE_POOL = 500;
+
 export interface DraftContextParams {
   messageId: string; // 要回覆的來訊
   userId: string; // 誰按了「AI 協助」
+}
+
+export interface StyleSampleRow {
+  text: string;
+  sentAt: Date | null;
+}
+
+// 取本人語料樣本池（categoryId null = 通用 = 全部語料）。
+// 匯出供測試驗證上限行為；一般呼叫端走 buildDraftContext。
+export function loadStyleSamplePool(
+  db: AppDatabase,
+  userId: string,
+  categoryId: string | null
+): StyleSampleRow[] {
+  return db
+    .select({ text: styleSamples.text, sentAt: styleSamples.sentAt })
+    .from(styleSamples)
+    .innerJoin(styleCorpora, eq(styleSamples.corpusId, styleCorpora.id))
+    .where(
+      categoryId === null
+        ? eq(styleCorpora.ownerId, userId)
+        : and(eq(styleCorpora.ownerId, userId), eq(styleCorpora.categoryId, categoryId))
+    )
+    .orderBy(sql`random()`)
+    .limit(MAX_SAMPLE_POOL)
+    .all();
 }
 
 export function buildDraftContext(
@@ -70,16 +100,7 @@ export function buildDraftContext(
     .get();
   const categoryId = setting?.styleCategoryId ?? null;
 
-  const samples = db
-    .select({ text: styleSamples.text, sentAt: styleSamples.sentAt })
-    .from(styleSamples)
-    .innerJoin(styleCorpora, eq(styleSamples.corpusId, styleCorpora.id))
-    .where(
-      categoryId === null
-        ? eq(styleCorpora.ownerId, userId)
-        : and(eq(styleCorpora.ownerId, userId), eq(styleCorpora.categoryId, categoryId))
-    )
-    .all();
+  const samples = loadStyleSamplePool(db, userId, categoryId);
 
   const styleSampleTexts = selectStyleSamples(
     samples.map((s) => ({ text: s.text, sentAt: s.sentAt?.getTime() ?? null }))

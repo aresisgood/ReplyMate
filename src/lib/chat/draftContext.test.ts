@@ -2,7 +2,12 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { createTestDb } from "../db/testDb";
 import { tables } from "../db";
 import type { AppDatabase } from "../db/types";
-import { buildDraftContext, RECENT_TURNS } from "./draftContext";
+import {
+  buildDraftContext,
+  loadStyleSamplePool,
+  MAX_SAMPLE_POOL,
+  RECENT_TURNS,
+} from "./draftContext";
 import { ForbiddenError, NotFoundError } from "./queries";
 import { createCategory } from "../corpus/categories";
 import { setStyleCategoryId } from "./settings";
@@ -142,6 +147,25 @@ describe("buildDraftContext", () => {
     const ctx = buildDraftContext(db, { messageId: myOwnMessageId, userId: boss.id });
     expect(ctx.styleSamples).toEqual([]);
     expect(ctx.incomingText).toBe("我自己說的話");
+  });
+
+  it("樣本池有上限——大量語料不會全數載入記憶體", () => {
+    // beforeEach 已 seed 3 句；再灌超過上限的量（分批避開 SQLite 參數上限）
+    const extra = MAX_SAMPLE_POOL + 50;
+    for (let i = 0; i < extra; i += 100) {
+      const batch = Array.from(
+        { length: Math.min(100, extra - i) },
+        (_, j) => `大量樣本 ${i + j}`
+      );
+      seedCorpus(me.id, `來源${i}`, batch);
+    }
+
+    const pool = loadStyleSamplePool(db, me.id, null);
+    expect(pool.length).toBe(MAX_SAMPLE_POOL);
+    // 走完整流程仍正常運作，回傳的 few-shot 數量不受影響
+    const ctx = buildDraftContext(db, { messageId: incomingId, userId: me.id });
+    expect(ctx.styleSamples.length).toBeGreaterThan(0);
+    expect(ctx.styleSamples.length).toBeLessThanOrEqual(15);
   });
 
   it("非對話參與者要求代筆 → ForbiddenError", () => {

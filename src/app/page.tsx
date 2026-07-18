@@ -6,7 +6,7 @@ import { db, tables } from "@/lib/db";
 import { openSession } from "@/lib/auth/session";
 import { SESSION_COOKIE } from "@/lib/auth/cookie";
 import { listConversations } from "@/lib/chat/queries";
-import { getAutoReply, getStyleCategory } from "@/lib/chat/settings";
+import { listConversationSettings } from "@/lib/chat/settings";
 import ChatApp from "./chat/ChatApp";
 
 export const dynamic = "force-dynamic";
@@ -19,14 +19,16 @@ export default async function Home() {
   const me = db.select().from(tables.users).where(eq(tables.users.id, userId)).get();
   if (!me) redirect("/login");
 
-  // 帶上每個對話的 autoReply 狀態與語料分類，UI 才能正確顯示開關、警示與分類選擇器
+  // 帶上每個對話的 autoReply 狀態與語料分類，UI 才能正確顯示開關、警示與分類選擇器。
+  // 設定以單次查詢批次取回（避免每對話 2 次查詢的 N+1）；無設定列則用預設值。
+  const settingsMap = listConversationSettings(db, userId);
   const conversations = listConversations(db, userId).map((c) => {
-    const styleCategory = getStyleCategory(db, userId, c.conversationId);
+    const s = settingsMap.get(c.conversationId);
     return {
       ...c,
-      autoReply: getAutoReply(db, userId, c.conversationId),
-      styleCategoryId: styleCategory?.id ?? null,
-      styleCategoryName: styleCategory?.name ?? null,
+      autoReply: s?.autoReply ?? false,
+      styleCategoryId: s?.styleCategoryId ?? null,
+      styleCategoryName: s?.styleCategoryName ?? null,
     };
   });
 

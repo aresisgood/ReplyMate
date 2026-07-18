@@ -2,7 +2,13 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { createTestDb } from "../db/testDb";
 import { tables } from "../db";
 import type { AppDatabase } from "../db/types";
-import { getAutoReply, setAutoReply, getStyleCategory, setStyleCategoryId } from "./settings";
+import {
+  getAutoReply,
+  setAutoReply,
+  getStyleCategory,
+  setStyleCategoryId,
+  listConversationSettings,
+} from "./settings";
 import { createCategory, renameCategory } from "../corpus/categories";
 import { ValidationError } from "./queries";
 
@@ -84,5 +90,35 @@ describe("styleCategory get/set", () => {
   it("set 非本人分類 → ValidationError", () => {
     const theirs = createCategory(db, boss.id, "同事");
     expect(() => setStyleCategoryId(db, me.id, convId, theirs.id)).toThrow(ValidationError);
+  });
+});
+
+describe("listConversationSettings", () => {
+  it("一次回傳本人所有對話設定（含分類名），不含他人的", () => {
+    const cat = createCategory(db, me.id, "主管");
+    setAutoReply(db, me.id, convId, true);
+    setStyleCategoryId(db, me.id, convId, cat.id);
+    // 對方在同一對話的設定不該混進來
+    setAutoReply(db, boss.id, convId, false);
+
+    const map = listConversationSettings(db, me.id);
+    expect(map.size).toBe(1);
+    expect(map.get(convId)).toEqual({
+      autoReply: true,
+      styleCategoryId: cat.id,
+      styleCategoryName: "主管",
+    });
+  });
+
+  it("未設定分類的對話回 null 分類；完全沒設定列的對話不在 map 中", () => {
+    setAutoReply(db, me.id, convId, true);
+    const map = listConversationSettings(db, me.id);
+    expect(map.get(convId)).toEqual({
+      autoReply: true,
+      styleCategoryId: null,
+      styleCategoryName: null,
+    });
+
+    expect(listConversationSettings(db, boss.id).size).toBe(0);
   });
 });
