@@ -1,12 +1,18 @@
 // 草稿情境組裝：把 DB 狀態轉成引擎需要的 BuildPromptInput（架構 §3 F1）。
 //
-// 語料對應決策：以「對方的 displayName」比對 styleCorpora.sourceName（該欄位
-// 保存匯出檔中的對話對象名稱），取出其 contactLabel 與樣本。零 schema 變更，
-// seed 的「王主管」即可對上「主管」語料。找不到時不阻擋——退化為無 few-shot
-// 範例、以對方名稱當標籤（架構 §6：語料不足不阻擋，僅品質降級）。
+// 語料決策：語料屬於使用者本人；對話可指定分類
+// （conversationSettings.styleCategoryId），null = 通用 = 合併全部語料。
+// 取出樣本後交 retrieval 分層抽樣；無樣本不阻擋（架構 §6 品質降級）。
 
 import { and, desc, eq, lt } from "drizzle-orm";
-import { conversations, messages, styleCorpora, styleSamples, users } from "../db/schema";
+import {
+  conversations,
+  conversationSettings,
+  messages,
+  styleCorpora,
+  styleSamples,
+  users,
+} from "../db/schema";
 import type { AppDatabase } from "../db/types";
 import { selectStyleSamples } from "../engine/retrieval";
 import type { BuildPromptInput, ConversationTurn } from "../engine/prompt";
@@ -51,18 +57,29 @@ export function buildDraftContext(
     .get();
   if (!counterpart) throw new NotFoundError("對話對象不存在");
 
-  // 依對方名稱找「我的」語料（只用自己的語料，不會誤用他人的）
-  const corpus = db
+  // 對話指定分類（null = 通用）；通用 = 本人全部語料，指定分類 = 只用該分類
+  const setting = db
     .select()
-    .from(styleCorpora)
+    .from(conversationSettings)
     .where(
-      and(eq(styleCorpora.ownerId, userId), eq(styleCorpora.sourceName, counterpart.displayName))
+      and(
+        eq(conversationSettings.userId, userId),
+        eq(conversationSettings.conversationId, incoming.conversationId)
+      )
     )
     .get();
+  const categoryId = setting?.styleCategoryId ?? null;
 
-  const samples = corpus
-    ? db.select().from(styleSamples).where(eq(styleSamples.corpusId, corpus.id)).all()
-    : [];
+  const samples = db
+    .select({ text: styleSamples.text, sentAt: styleSamples.sentAt })
+    .from(styleSamples)
+    .innerJoin(styleCorpora, eq(styleSamples.corpusId, styleCorpora.id))
+    .where(
+      categoryId === null
+        ? eq(styleCorpora.ownerId, userId)
+        : and(eq(styleCorpora.ownerId, userId), eq(styleCorpora.categoryId, categoryId))
+    )
+    .all();
 
   const styleSampleTexts = selectStyleSamples(
     samples.map((s) => ({ text: s.text, sentAt: s.sentAt?.getTime() ?? null }))
@@ -94,7 +111,6 @@ export function buildDraftContext(
 
   return {
     displayName: me.displayName,
-    contactLabel: corpus?.contactLabel ?? counterpart.displayName,
     styleSamples: styleSampleTexts,
     recentTurns,
     incomingText: incoming.text,

@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { advanceCursor, mergeById, type TimelineMessage } from "@/lib/chat/timeline";
+import CategoryPicker, { type CategoryOption } from "../components/CategoryPicker";
 
 const POLL_INTERVAL_MS = 2000;
 
@@ -17,6 +18,8 @@ interface ConversationSummary {
   lastMessageText: string | null;
   lastActivityMs: number;
   autoReply: boolean;
+  styleCategoryId: string | null;
+  styleCategoryName: string | null;
 }
 
 type ChatMessage = TimelineMessage;
@@ -45,6 +48,8 @@ export default function ChatApp({ me, initialConversations }: Props) {
 
   const [aiDraft, setAiDraft] = useState<ActiveDraft | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [categories, setCategories] = useState<CategoryOption[]>([]);
+  const [categoriesLoaded, setCategoriesLoaded] = useState(false);
   // 單一錯誤列，承載送訊／草稿／設定三條路徑的失敗訊息。任何一條失敗都必須
   // 讓使用者看見——靜默失敗會讓人以為訊息已經送出（coding-style：絕不靜默吞噬錯誤）。
   const [error, setError] = useState<string | null>(null);
@@ -238,6 +243,104 @@ export default function ChatApp({ me, initialConversations }: Props) {
     }
   }
 
+  async function loadCategories() {
+    if (categoriesLoaded) return;
+    try {
+      const res = await fetch("/api/categories");
+      if (res.ok) {
+        const body = (await res.json()) as { categories: CategoryOption[] };
+        setCategories(body.categories);
+        setCategoriesLoaded(true);
+      }
+    } catch {
+      // 展開時載入失敗維持現狀；下次展開重試
+    }
+  }
+
+  async function handleCreateCategory(name: string): Promise<CategoryOption | null> {
+    setError(null);
+    try {
+      const res = await fetch("/api/categories", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const body = (await res.json().catch(() => null)) as
+        | { id?: string; name?: string; error?: string }
+        | null;
+      if (!res.ok || !body?.id || !body.name) {
+        setError(body?.error ?? "分類建立失敗，請稍後再試");
+        return null;
+      }
+      const created = { id: body.id, name: body.name };
+      setCategories((list) => [...list, created]);
+      return created;
+    } catch {
+      setError("無法連線到伺服器");
+      return null;
+    }
+  }
+
+  async function handleRenameCategory(id: string, name: string): Promise<boolean> {
+    setError(null);
+    try {
+      const res = await fetch(`/api/categories/${id}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const body = (await res.json().catch(() => null)) as
+        | { name?: string; error?: string }
+        | null;
+      if (!res.ok || !body?.name) {
+        setError(body?.error ?? "分類改名失敗，請稍後再試");
+        return false;
+      }
+      const newName = body.name;
+      setCategories((list) => list.map((c) => (c.id === id ? { id, name: newName } : c)));
+      // 已套用此分類的對話按鈕名稱同步更新
+      setConversations((list) =>
+        list.map((c) =>
+          c.styleCategoryId === id ? { ...c, styleCategoryName: newName } : c
+        )
+      );
+      return true;
+    } catch {
+      setError("無法連線到伺服器");
+      return false;
+    }
+  }
+
+  async function handleSelectCategory(category: CategoryOption | null) {
+    if (!active) return;
+    setError(null);
+    try {
+      const res = await fetch(`/api/conversations/${active.conversationId}/settings`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ styleCategoryId: category?.id ?? null }),
+      });
+      if (res.ok) {
+        setConversations((list) =>
+          list.map((c) =>
+            c.conversationId === active.conversationId
+              ? {
+                  ...c,
+                  styleCategoryId: category?.id ?? null,
+                  styleCategoryName: category?.name ?? null,
+                }
+              : c
+          )
+        );
+      } else {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        setError(body?.error ?? "語料分類設定失敗，請稍後再試");
+      }
+    } catch {
+      setError("無法連線到伺服器");
+    }
+  }
+
   async function handleLogout() {
     // 登出失敗（例如離線）不該把使用者卡在聊天畫面：cookie 清除是伺服器端的
     // 事，但導回登入頁至少讓他能重試登入。
@@ -379,6 +482,16 @@ export default function ChatApp({ me, initialConversations }: Props) {
             )}
 
             <form onSubmit={handleSend} className="flex gap-2 border-t border-gray-200 bg-white p-4">
+              <CategoryPicker
+                categories={categories}
+                valueId={active.styleCategoryId}
+                valueName={active.styleCategoryName ?? "通用"}
+                onOpen={loadCategories}
+                onSelect={handleSelectCategory}
+                onCreate={handleCreateCategory}
+                onRename={handleRenameCategory}
+                direction="up"
+              />
               <button
                 type="button"
                 onClick={handleAskAi}

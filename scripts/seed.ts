@@ -55,7 +55,7 @@ async function main() {
   // 初始風格語料（正式資料由 Week 6 的上傳流程經 lineParser 產生）
   const [corpus] = db
     .insert(tables.styleCorpora)
-    .values({ ownerId: me.id, contactLabel: "主管", sourceName: "王主管" })
+    .values({ ownerId: me.id, sourceName: "王主管" })
     .returning()
     .all();
 

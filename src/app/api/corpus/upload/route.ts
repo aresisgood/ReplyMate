@@ -1,4 +1,4 @@
-// POST /api/corpus/upload — { fileText, contactLabel } → 建立/取代風格語料（架構 §3 F2）
+// POST /api/corpus/upload — { fileText, categoryId? } → 建立/取代風格語料（架構 §3 F2）
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireUser, mapChatError, readJsonWithLimit, PayloadTooLargeError } from "@/lib/http";
@@ -7,7 +7,6 @@ import { corpusUploadRateLimiter } from "@/lib/rateLimit";
 
 // 以字元計的檔案上限；解析為 CPU 密集操作，須擋濫用。
 const MAX_FILE_CHARS = 2_097_152;
-const MAX_LABEL_CHARS = 20;
 
 // 位元組計的 body 上限，比 MAX_FILE_CHARS 更早生效。兩者單位不同不是疏漏：
 // 前者限制「要解析多少文字」，後者限制「要讀進多少記憶體」。上限取 8 MiB——
@@ -33,9 +32,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "請求格式錯誤" }, { status: 400 });
   }
 
-  const { fileText, contactLabel } = (body ?? {}) as {
+  const { fileText, categoryId } = (body ?? {}) as {
     fileText?: unknown;
-    contactLabel?: unknown;
+    categoryId?: unknown;
   };
   if (typeof fileText !== "string" || fileText.length === 0) {
     return NextResponse.json({ error: "缺少 fileText" }, { status: 400 });
@@ -43,13 +42,16 @@ export async function POST(request: NextRequest) {
   if (fileText.length > MAX_FILE_CHARS) {
     return NextResponse.json({ error: "檔案過大（上限約 2 MB）" }, { status: 413 });
   }
-  const label = typeof contactLabel === "string" ? contactLabel.trim() : "";
-  if (label.length === 0 || label.length > MAX_LABEL_CHARS) {
-    return NextResponse.json({ error: "contactLabel 須為 1–20 字" }, { status: 400 });
+  if (categoryId !== undefined && categoryId !== null && typeof categoryId !== "string") {
+    return NextResponse.json({ error: "categoryId 格式錯誤" }, { status: 400 });
   }
 
   try {
-    const result = importLineCorpus(db, { ownerId: userId, fileText, contactLabel: label });
+    const result = importLineCorpus(db, {
+      ownerId: userId,
+      fileText,
+      categoryId: categoryId ?? null,
+    });
     return NextResponse.json(result);
   } catch (e) {
     return mapChatError(e, "POST corpus/upload");

@@ -37,6 +37,8 @@ function conversations() {
       lastMessageText: "急件",
       lastActivityMs: 1000,
       autoReply: false,
+      styleCategoryId: null as string | null,
+      styleCategoryName: null as string | null,
     },
     {
       conversationId: "c2",
@@ -45,6 +47,8 @@ function conversations() {
       lastMessageText: "爬山",
       lastActivityMs: 2000,
       autoReply: false,
+      styleCategoryId: null as string | null,
+      styleCategoryName: null as string | null,
     },
   ];
 }
@@ -82,6 +86,9 @@ beforeEach(() => {
   fetchMock.mockImplementation(async (input: string, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? "GET";
+    if (url.endsWith("/api/categories") && method === "GET") {
+      return jsonResponse({ categories: [{ id: "k1", name: "朋友" }] });
+    }
     if (url.includes("/messages") && method === "GET") {
       const after = parseAfter(url);
       const all = store[convIdFromUrl(url)] ?? [];
@@ -386,5 +393,62 @@ describe("ChatApp — 登出", () => {
     await user.click(screen.getByRole("button", { name: "登出" }));
 
     await waitFor(() => expect(push).toHaveBeenCalledWith("/login"));
+  });
+});
+
+describe("ChatApp — 語料分類選擇", () => {
+  it("AI 協助旁顯示目前分類（預設通用）", async () => {
+    render(<ChatApp me={ME} initialConversations={conversations()} />);
+    expect(await screen.findByRole("button", { name: "語料分類" })).toHaveTextContent("通用");
+  });
+
+  it("展開選單選擇分類 → PUT 對話設定並更新按鈕", async () => {
+    const user = userEvent.setup();
+    render(<ChatApp me={ME} initialConversations={conversations()} />);
+    await user.click(screen.getByRole("button", { name: "語料分類" }));
+    await user.click(await screen.findByRole("button", { name: "朋友" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "語料分類" })).toHaveTextContent("朋友")
+    );
+    const putCall = fetchMock.mock.calls.find(
+      ([u, i]) => String(u).includes("/conversations/c1/settings") && i?.method === "PUT"
+    );
+    expect(putCall).toBeTruthy();
+    expect(JSON.parse((putCall![1] as RequestInit).body as string)).toEqual({
+      styleCategoryId: "k1",
+    });
+  });
+
+  it("PUT 失敗時顯示錯誤且按鈕維持原分類", async () => {
+    const user = userEvent.setup();
+    // 覆寫：settings PUT 回 400
+    const base = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input: string, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/settings") && init?.method === "PUT") {
+        return jsonResponse({ error: "x" }, { ok: false, status: 400 });
+      }
+      return base(input, init);
+    });
+
+    render(<ChatApp me={ME} initialConversations={conversations()} />);
+    await user.click(screen.getByRole("button", { name: "語料分類" }));
+    await user.click(await screen.findByRole("button", { name: "朋友" }));
+
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "語料分類" })).toHaveTextContent("通用");
+  });
+
+  it("切換對話時選擇器顯示該對話自己的分類", async () => {
+    const user = userEvent.setup();
+    const convs = conversations();
+    convs[1] = { ...convs[1], styleCategoryId: "k1", styleCategoryName: "朋友" };
+    render(<ChatApp me={ME} initialConversations={convs} />);
+    expect(screen.getByRole("button", { name: "語料分類" })).toHaveTextContent("通用");
+    await user.click(screen.getByText("小美"));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "語料分類" })).toHaveTextContent("朋友")
+    );
   });
 });

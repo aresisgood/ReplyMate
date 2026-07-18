@@ -6,6 +6,7 @@ import type { AppDatabase } from "../db/types";
 import { styleCorpora, styleSamples, users } from "../db/schema";
 import { ValidationError } from "../chat/queries";
 import { importLineCorpus, listCorpora } from "./corpus";
+import { createCategory } from "./categories";
 
 // 我方（賴庭右）發言 4 則：2 則有效、[貼圖] 濾除、「嗯」過短濾除
 const EXPORT_FIXTURE = [
@@ -45,12 +46,11 @@ describe("importLineCorpus", () => {
     const result = importLineCorpus(db, {
       ownerId,
       fileText: EXPORT_FIXTURE,
-      contactLabel: "主管",
     });
 
     expect(result).toMatchObject({
       sourceName: "王主管",
-      contactLabel: "主管",
+      categoryId: null,
       sampleCount: 2,
       replaced: false,
     });
@@ -75,23 +75,20 @@ describe("importLineCorpus", () => {
     const result = importLineCorpus(db, {
       ownerId: otherId,
       fileText: EXPORT_FIXTURE,
-      contactLabel: "主管",
     });
     expect(result.sampleCount).toBe(2);
   });
 
-  it("重傳同一對象：整組取代（舊 corpus 與 samples 消失、replaced=true）", () => {
-    const first = importLineCorpus(db, {
-      ownerId,
-      fileText: EXPORT_FIXTURE,
-      contactLabel: "主管",
-    });
+  it("同 owner 同 sourceName 重傳：整組取代且可換分類", () => {
+    const cat = createCategory(db, ownerId, "主管");
+    const first = importLineCorpus(db, { ownerId, fileText: EXPORT_FIXTURE });
     const second = importLineCorpus(db, {
       ownerId,
       fileText: EXPORT_FIXTURE,
-      contactLabel: "同事", // 重傳可換標籤
+      categoryId: cat.id,
     });
 
+    expect(first.replaced).toBe(false);
     expect(second.replaced).toBe(true);
     expect(second.corpusId).not.toBe(first.corpusId);
 
@@ -101,7 +98,7 @@ describe("importLineCorpus", () => {
       .where(eq(styleCorpora.ownerId, ownerId))
       .all();
     expect(corpora).toHaveLength(1);
-    expect(corpora[0].contactLabel).toBe("同事");
+    expect(corpora[0].categoryId).toBe(cat.id);
 
     const orphans = db
       .select()
@@ -111,15 +108,22 @@ describe("importLineCorpus", () => {
     expect(orphans).toHaveLength(0);
   });
 
+  it("categoryId 不存在或非本人 → ValidationError，不寫入資料", () => {
+    expect(() =>
+      importLineCorpus(db, { ownerId, fileText: EXPORT_FIXTURE, categoryId: "no-such" })
+    ).toThrow(ValidationError);
+    expect(db.select().from(styleCorpora).all()).toHaveLength(0);
+  });
+
   it("無 LINE 標頭：ValidationError（無法辨識格式）", () => {
     expect(() =>
-      importLineCorpus(db, { ownerId, fileText: "隨便的內容", contactLabel: "主管" })
+      importLineCorpus(db, { ownerId, fileText: "隨便的內容" })
     ).toThrow(ValidationError);
   });
 
   it("只有對方發言：ValidationError（無可用樣本），且不寫入任何資料", () => {
     expect(() =>
-      importLineCorpus(db, { ownerId, fileText: CONTACT_ONLY_FIXTURE, contactLabel: "主管" })
+      importLineCorpus(db, { ownerId, fileText: CONTACT_ONLY_FIXTURE })
     ).toThrow(ValidationError);
     expect(db.select().from(styleCorpora).all()).toHaveLength(0);
   });
@@ -127,19 +131,20 @@ describe("importLineCorpus", () => {
 
 describe("listCorpora", () => {
   it("列出本人語料含句數；不含他人的", () => {
-    importLineCorpus(db, { ownerId, fileText: EXPORT_FIXTURE, contactLabel: "主管" });
+    importLineCorpus(db, { ownerId, fileText: EXPORT_FIXTURE });
     const otherId = db
       .insert(users)
       .values({ username: "other", passwordHash: "x", displayName: "路人" })
       .returning()
       .get().id;
-    importLineCorpus(db, { ownerId: otherId, fileText: EXPORT_FIXTURE, contactLabel: "朋友" });
+    importLineCorpus(db, { ownerId: otherId, fileText: EXPORT_FIXTURE });
 
     const mine = listCorpora(db, ownerId);
     expect(mine).toHaveLength(1);
     expect(mine[0]).toMatchObject({
-      contactLabel: "主管",
       sourceName: "王主管",
+      categoryId: null,
+      categoryName: null,
       sampleCount: 2,
     });
     expect(mine[0].createdAtMs).toBeTypeOf("number");

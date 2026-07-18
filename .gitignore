@@ -12,6 +12,4 @@ dev.db-shm
 
 # Claude Code 個人工作環境：skills、agents、hooks、statusline 二進位檔皆屬本機設定，
 # 不進版控。專案規範（CLAUDE.md、rules/）例外保留。
-.claude/*
-!.claude/CLAUDE.md
-!.claude/rules/
+.claude/

@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-// SettingsApp：清單渲染、sourceName 不匹配警示、上傳前置條件，以及 handleUpload
-// 的四條路徑（成功、取代舊語料、伺服器回錯、fetch 失敗）與上傳中的按鈕狀態。
+// SettingsApp：清單渲染（分類 badge、來源、句數）、上傳前置條件，以及透過共用
+// CorpusUploadForm 完成上傳後重抓 /api/corpus 更新清單的流程。
 import { describe, expect, it, afterEach, beforeEach, vi } from "vitest";
-import { render, screen, cleanup, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
 import SettingsApp from "./SettingsApp";
@@ -12,48 +12,48 @@ afterEach(() => cleanup());
 const CORPORA = [
   {
     id: "c1",
-    contactLabel: "主管",
     sourceName: "王主管",
+    categoryId: null,
+    categoryName: null,
     sampleCount: 48,
     createdAtMs: 1_700_000_000_000,
   },
   {
     id: "c2",
-    contactLabel: "朋友",
     sourceName: "陳小美",
+    categoryId: "k1",
+    categoryName: "朋友",
     sampleCount: 12,
     createdAtMs: 1_700_000_000_000,
   },
 ];
 
 describe("SettingsApp", () => {
-  it("渲染語料清單（標籤、來源、句數）", () => {
-    render(<SettingsApp initialCorpora={CORPORA} counterpartNames={["王主管"]} />);
-    expect(screen.getByText("主管")).toBeInTheDocument();
-    expect(screen.getByText(/王主管/)).toBeInTheDocument();
-    expect(screen.getByText(/48 句/)).toBeInTheDocument();
-  });
-
-  it("sourceName 與既有對話對象不符時顯示警示", () => {
-    render(<SettingsApp initialCorpora={CORPORA} counterpartNames={["王主管"]} />);
-    // 陳小美不在對話對象中 → 警示；王主管有 → 無警示
-    expect(screen.getAllByText(/沒有名為/)).toHaveLength(1);
+  it("渲染語料清單（分類 badge、來源、句數）", () => {
+    render(<SettingsApp initialCorpora={CORPORA} />);
+    expect(screen.getByText("王主管")).toBeInTheDocument();
+    expect(screen.getByText("陳小美")).toBeInTheDocument();
+    // c1 categoryName null → 通用 badge；c2 → 朋友 badge
+    expect(screen.getByText("通用")).toBeInTheDocument();
+    expect(screen.getByText("朋友")).toBeInTheDocument();
+    expect(screen.getByText("48 句")).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
   });
 
   it("未選擇檔案時上傳按鈕 disabled", () => {
-    render(<SettingsApp initialCorpora={[]} counterpartNames={[]} />);
+    render(<SettingsApp initialCorpora={[]} />);
     expect(screen.getByRole("button", { name: "上傳" })).toBeDisabled();
   });
 
   it("無語料時顯示空狀態", () => {
-    render(<SettingsApp initialCorpora={[]} counterpartNames={[]} />);
+    render(<SettingsApp initialCorpora={[]} />);
     expect(screen.getByText(/尚未上傳/)).toBeInTheDocument();
   });
 });
 
 // --- 上傳流程 ---
-// 表單只有在「已選檔 + 已填標籤」時才可送出，故每個案例都先跑 fillForm。
-// jsdom 29 的 File 原生支援 .text()（元件用它讀檔），無需 polyfill。
+// 上傳互動由共用 CorpusUploadForm 負責，成功後 onUploaded 重抓 /api/corpus。
+// 測試只選檔（分類預設「通用」）即可送出。jsdom 29 的 File 原生支援 .text()。
 
 function jsonResponse(body: unknown, init: { ok?: boolean; status?: number } = {}) {
   return {
@@ -65,13 +65,12 @@ function jsonResponse(body: unknown, init: { ok?: boolean; status?: number } = {
 
 const fetchMock = vi.fn();
 
-/** 選一個 .txt 檔並填入對象類型，讓上傳按鈕解除 disabled。 */
-async function fillForm(user: ReturnType<typeof userEvent.setup>, label = "主管") {
+/** 選一個 .txt 檔，讓上傳按鈕解除 disabled（分類維持預設「通用」）。 */
+async function fillForm(user: ReturnType<typeof userEvent.setup>) {
   const file = new File(["2024/01/01\n10:00\t我\t收到，晚點回你"], "line.txt", {
     type: "text/plain",
   });
   await user.upload(screen.getByLabelText("選擇 LINE 匯出檔"), file);
-  await user.type(screen.getByPlaceholderText(/對象類型/), label);
   return file;
 }
 
@@ -87,48 +86,31 @@ describe("SettingsApp — 上傳語料", () => {
 
   it("上傳成功時顯示樣本數並以最新清單取代畫面", async () => {
     const user = userEvent.setup();
-    // 依序：POST /api/corpus/upload → GET /api/corpus
+    // 依序：POST /api/corpus/upload → GET /api/corpus（onUploaded 重抓）
     fetchMock
       .mockResolvedValueOnce(
         jsonResponse({ sourceName: "王主管", sampleCount: 48, replaced: false })
       )
       .mockResolvedValueOnce(jsonResponse({ corpora: CORPORA }));
 
-    render(<SettingsApp initialCorpora={[]} counterpartNames={["王主管"]} />);
-    await fillForm(user);
-    await user.click(screen.getByRole("button", { name: "上傳" }));
-
-    expect(await screen.findByText("已為「王主管」建立 48 句樣本")).toBeInTheDocument();
-    // 清單由 GET /api/corpus 的結果重新渲染（初始為空狀態）
-    // 用 exact 字串避免同時匹配到成功訊息裡的「48 句樣本」
-    expect(screen.getByText("48 句")).toBeInTheDocument();
-    expect(screen.getAllByRole("listitem")).toHaveLength(2);
-    expect(screen.queryByText(/尚未上傳/)).not.toBeInTheDocument();
-
-    // 送出的 body 帶檔案內容與標籤
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("/api/corpus/upload");
-    expect(JSON.parse((init as RequestInit).body as string)).toEqual({
-      fileText: "2024/01/01\n10:00\t我\t收到，晚點回你",
-      contactLabel: "主管",
-    });
-  });
-
-  it("replaced=true 時訊息附註取代舊語料", async () => {
-    const user = userEvent.setup();
-    fetchMock
-      .mockResolvedValueOnce(
-        jsonResponse({ sourceName: "王主管", sampleCount: 12, replaced: true })
-      )
-      .mockResolvedValueOnce(jsonResponse({ corpora: [] }));
-
-    render(<SettingsApp initialCorpora={[]} counterpartNames={[]} />);
+    render(<SettingsApp initialCorpora={[]} />);
     await fillForm(user);
     await user.click(screen.getByRole("button", { name: "上傳" }));
 
     expect(
-      await screen.findByText("已為「王主管」建立 12 句樣本（取代舊語料）")
+      await screen.findByText("已從「王主管」的對話建立 48 句語氣樣本（分類：通用）")
     ).toBeInTheDocument();
+    // 清單由 GET /api/corpus 的結果重新渲染（初始為空狀態）
+    expect(screen.getByText("48 句")).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    expect(screen.queryByText(/尚未上傳/)).not.toBeInTheDocument();
+
+    // 送出的 body 只帶檔案內容（分類為通用時不帶 categoryId）
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/corpus/upload");
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({
+      fileText: "2024/01/01\n10:00\t我\t收到，晚點回你",
+    });
   });
 
   it("伺服器回錯誤時顯示該錯誤訊息", async () => {
@@ -137,7 +119,7 @@ describe("SettingsApp — 上傳語料", () => {
       jsonResponse({ error: "檔案格式無法解析" }, { ok: false, status: 400 })
     );
 
-    render(<SettingsApp initialCorpora={[]} counterpartNames={[]} />);
+    render(<SettingsApp initialCorpora={[]} />);
     await fillForm(user);
     await user.click(screen.getByRole("button", { name: "上傳" }));
 
@@ -150,11 +132,44 @@ describe("SettingsApp — 上傳語料", () => {
     const user = userEvent.setup();
     fetchMock.mockRejectedValueOnce(new Error("network down"));
 
-    render(<SettingsApp initialCorpora={[]} counterpartNames={[]} />);
+    render(<SettingsApp initialCorpora={[]} />);
     await fillForm(user);
     await user.click(screen.getByRole("button", { name: "上傳" }));
 
     expect(await screen.findByText("上傳失敗，請稍後再試")).toBeInTheDocument();
+  });
+
+  it("透過選單改名分類後，語料清單的分類 badge 同步更新", async () => {
+    const user = userEvent.setup();
+    // 依 url+method 分派：展開選單載清單 → PUT 改名 → onCategoryChanged 重抓語料
+    fetchMock.mockImplementation(async (input: string, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url === "/api/categories" && method === "GET") {
+        return jsonResponse({ categories: [{ id: "k1", name: "朋友" }] });
+      }
+      if (url === "/api/categories/k1" && method === "PUT") {
+        return jsonResponse({ id: "k1", name: "麻吉" });
+      }
+      if (url === "/api/corpus" && method === "GET") {
+        return jsonResponse({
+          corpora: [CORPORA[0], { ...CORPORA[1], categoryName: "麻吉" }],
+        });
+      }
+      return jsonResponse({});
+    });
+
+    render(<SettingsApp initialCorpora={CORPORA} />);
+    await user.click(screen.getByRole("button", { name: "語料分類" }));
+    await user.click(await screen.findByRole("button", { name: "重新命名 朋友" }));
+    const input = screen.getByLabelText("分類新名稱");
+    await user.clear(input);
+    await user.type(input, "麻吉");
+    await user.click(screen.getByRole("button", { name: "確定" }));
+
+    // 語料清單（非選單）的 badge 必須反映新名稱——改名後重抓 /api/corpus
+    const list = await screen.findByRole("list", { name: "語料清單" });
+    await waitFor(() => expect(within(list).getByText("麻吉")).toBeInTheDocument());
   });
 
   it("上傳中按鈕顯示「上傳中…」且 disabled，完成後恢復", async () => {
@@ -168,7 +183,7 @@ describe("SettingsApp — 上傳語料", () => {
       )
       .mockResolvedValueOnce(jsonResponse({ corpora: [] }));
 
-    render(<SettingsApp initialCorpora={[]} counterpartNames={[]} />);
+    render(<SettingsApp initialCorpora={[]} />);
     await fillForm(user);
     await user.click(screen.getByRole("button", { name: "上傳" }));
 

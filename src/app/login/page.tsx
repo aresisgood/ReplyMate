@@ -26,7 +26,20 @@ export default function LoginPage() {
         setError(body?.error ?? "登入失敗，請稍後再試");
         return;
       }
-      router.push("/");
+      // 無語料的新使用者導向引導頁；檢查失敗不阻擋登入（退回聊天首頁）
+      let target = "/";
+      try {
+        const corpusRes = await fetch("/api/corpus");
+        if (corpusRes.ok) {
+          const corpusBody = (await corpusRes.json()) as { corpora?: unknown[] };
+          if (Array.isArray(corpusBody.corpora) && corpusBody.corpora.length === 0) {
+            target = "/onboarding";
+          }
+        }
+      } catch {
+        // 引導檢查失敗不影響登入
+      }
+      router.push(target);
       router.refresh();
     } catch {
       setError("無法連線到伺服器");

@@ -16,7 +16,6 @@ beforeAll(() => {
 
 const PROMPT_INPUT: BuildPromptInput = {
   displayName: "賴庭右",
-  contactLabel: "主管",
   styleSamples: ["好的，我今晚整理完寄給您"],
   recentTurns: [{ sender: "王主管", text: "報告進度如何？", isSelf: false }],
   incomingText: "報告進度如何？",

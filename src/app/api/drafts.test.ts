@@ -36,6 +36,7 @@ let sqlite: Database.Database;
 let meId: string;
 let bossId: string;
 let convId: string;
+let categoryId: string; // meId 擁有的自訂分類
 let incomingId: string; // boss 傳給我的訊息
 let myMessageId: string;
 let meCookie: string;
@@ -112,15 +113,22 @@ beforeAll(async () => {
     .returning()
     .get().id;
 
-  // 我的風格語料（對方 displayName「王主管」對應 sourceName）
+  // 我的風格語料（使用者層級樣本，預設通用 categoryId=null）
   const corpus = db
     .insert(schema.styleCorpora)
-    .values({ ownerId: meId, contactLabel: "主管", sourceName: "王主管" })
+    .values({ ownerId: meId, sourceName: "王主管" })
     .returning()
     .get();
   db.insert(schema.styleSamples)
     .values([{ corpusId: corpus.id, text: "好的，我今晚整理完寄給您" }])
     .run();
+
+  // 我的一個自訂分類，供 settings PUT 的 styleCategoryId 測試使用
+  categoryId = db
+    .insert(schema.styleCategories)
+    .values({ ownerId: meId, name: "主管" })
+    .returning()
+    .get().id;
 
   draftsRoute = await import("./drafts/route");
   finalizeRoute = await import("./drafts/[id]/finalize/route");
@@ -203,7 +211,6 @@ describe("POST /api/drafts", () => {
     const params = generateDraft.mock.calls[0][0];
     expect(params.prompt.incomingText).toBe("週六幫我看一下合約，急");
     expect(params.prompt.displayName).toBe("賴庭右");
-    expect(params.prompt.contactLabel).toBe("主管");
     expect(params.prompt.styleSamples).toContain("好的，我今晚整理完寄給您");
     expect(params.envFallback).toBe("sk-env-fallback");
   });
@@ -352,6 +359,51 @@ describe("PUT /api/conversations/:id/settings", () => {
     const rows = db.select().from(schema.conversationSettings).all();
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ userId: meId, autoReply: true });
+  });
+
+  it("空 body（皆未提供）：400", async () => {
+    const res = await settingsRoute.PUT(
+      put(`/api/conversations/${convId}/settings`, {}, meCookie),
+      ctx()
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("設定 styleCategoryId：200，回傳該分類且落地", async () => {
+    const res = await settingsRoute.PUT(
+      put(`/api/conversations/${convId}/settings`, { styleCategoryId: categoryId }, meCookie),
+      ctx()
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json()).styleCategoryId).toBe(categoryId);
+
+    const rows = db.select().from(schema.conversationSettings).all();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ userId: meId, styleCategoryId: categoryId });
+  });
+
+  it("設定 styleCategoryId=null（回到通用）：200", async () => {
+    const res = await settingsRoute.PUT(
+      put(`/api/conversations/${convId}/settings`, { styleCategoryId: null }, meCookie),
+      ctx()
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json()).styleCategoryId).toBeNull();
+  });
+
+  it("同時設定 autoReply 與 styleCategoryId：200，兩者皆生效", async () => {
+    const res = await settingsRoute.PUT(
+      put(
+        `/api/conversations/${convId}/settings`,
+        { autoReply: true, styleCategoryId: null },
+        meCookie
+      ),
+      ctx()
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.autoReply).toBe(true);
+    expect(body.styleCategoryId).toBeNull();
   });
 });
 

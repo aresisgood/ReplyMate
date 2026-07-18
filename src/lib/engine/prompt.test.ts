@@ -4,7 +4,6 @@ import { buildPrompt, type BuildPromptInput } from "./prompt";
 function baseInput(overrides: Partial<BuildPromptInput> = {}): BuildPromptInput {
   return {
     displayName: "賴庭右",
-    contactLabel: "主管",
     styleSamples: ["好的，我今晚整理完寄給您", "辛苦了，明天見"],
     recentTurns: [
       { sender: "王主管", text: "明天的報告記得帶", isSelf: false },
@@ -16,10 +15,10 @@ function baseInput(overrides: Partial<BuildPromptInput> = {}): BuildPromptInput 
 }
 
 describe("buildPrompt", () => {
-  it("system 帶入本人名稱與對象類型", () => {
+  it("system 帶入本人名稱與語氣模仿指示", () => {
     const { system } = buildPrompt(baseInput());
     expect(system).toContain("賴庭右");
-    expect(system).toContain("主管");
+    expect(system).toContain("你過去傳過的真實訊息範例");
   });
 
   it("system 內嵌所有風格範例", () => {
