@@ -136,7 +136,7 @@ describe("maybeAutoReply", () => {
     // 種一份「我的」語料，讓對方 displayName 對得上，draftContext 才會帶樣本
     const corpus = db
       .insert(tables.styleCorpora)
-      .values({ ownerId: me.id, contactLabel: "主管", sourceName: "王主管" })
+      .values({ ownerId: me.id, sourceName: "王主管" })
       .returning()
       .get();
     db.insert(tables.styleSamples)

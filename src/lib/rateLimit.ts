@@ -76,6 +76,8 @@ export const draftRateLimiter = createRateLimiter({ limit: 5, windowMs: 60_000 }
 export const autoReplyRateLimiter = createRateLimiter({ limit: 1, windowMs: 10_000 });
 // 語料上傳：解析為 CPU 密集操作（非付費呼叫，但大檔可拖垮單機 Demo）
 export const corpusUploadRateLimiter = createRateLimiter({ limit: 5, windowMs: 60_000 });
+// 分類寫入（建立/改名共用）：非高成本操作，但與其他寫入端點維持一致的濫用防線
+export const categoryRateLimiter = createRateLimiter({ limit: 20, windowMs: 60_000 });
 
 // 登入採雙層限流：
 // - 依帳號：擋單一帳號的密碼爆破。成功登入會歸還額度，正常使用者不會因為
@@ -92,4 +94,5 @@ export function resetRateLimiters(): void {
   loginIpRateLimiter.reset();
   autoReplyRateLimiter.reset();
   corpusUploadRateLimiter.reset();
+  categoryRateLimiter.reset();
 }

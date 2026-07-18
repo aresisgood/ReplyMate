@@ -1,5 +1,5 @@
 // corpus API 整合測試：匯入語意已在 lib 層單元測過，這裡守
-// 401/驗證邊界/413/429 與 happy path。
+// 401/驗證邊界/413/429、分類（categoryId）與 happy path。
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -22,6 +22,7 @@ process.env.APP_SECRET = "test-secret-for-unit-tests-only";
 let loginRoute: typeof import("./auth/login/route");
 let uploadRoute: typeof import("./corpus/upload/route");
 let listRoute: typeof import("./corpus/route");
+let categoriesRoute: typeof import("./categories/route");
 
 let cookie: string;
 
@@ -46,6 +47,11 @@ function getRequest(url: string, c?: string): NextRequest {
   return new NextRequest(`http://localhost${url}`, { headers: c ? { cookie: c } : {} });
 }
 
+async function createCategory(name: string): Promise<string> {
+  const res = await categoriesRoute.POST(jsonRequest("/api/categories", { name }, cookie));
+  return (await res.json()).id;
+}
+
 beforeAll(async () => {
   const sqlite = new Database(DB_FILE);
   sqlite.pragma("foreign_keys = ON");
@@ -60,6 +66,7 @@ beforeAll(async () => {
   loginRoute = await import("./auth/login/route");
   uploadRoute = await import("./corpus/upload/route");
   listRoute = await import("./corpus/route");
+  categoriesRoute = await import("./categories/route");
 
   const res = await loginRoute.POST(
     jsonRequest("/api/auth/login", { username: "tingyu", password: "demo1234" })
@@ -78,41 +85,19 @@ afterAll(() => {
 describe("POST /api/corpus/upload", () => {
   it("未登入：401", async () => {
     const res = await uploadRoute.POST(
-      jsonRequest("/api/corpus/upload", { fileText: EXPORT_FIXTURE, contactLabel: "主管" })
+      jsonRequest("/api/corpus/upload", { fileText: EXPORT_FIXTURE })
     );
     expect(res.status).toBe(401);
   });
 
   it("缺 fileText：400", async () => {
-    const res = await uploadRoute.POST(
-      jsonRequest("/api/corpus/upload", { contactLabel: "主管" }, cookie)
-    );
+    const res = await uploadRoute.POST(jsonRequest("/api/corpus/upload", {}, cookie));
     expect(res.status).toBe(400);
-  });
-
-  it("contactLabel 空白或超長：400", async () => {
-    const blank = await uploadRoute.POST(
-      jsonRequest("/api/corpus/upload", { fileText: EXPORT_FIXTURE, contactLabel: "  " }, cookie)
-    );
-    expect(blank.status).toBe(400);
-
-    const tooLong = await uploadRoute.POST(
-      jsonRequest(
-        "/api/corpus/upload",
-        { fileText: EXPORT_FIXTURE, contactLabel: "一".repeat(21) },
-        cookie
-      )
-    );
-    expect(tooLong.status).toBe(400);
   });
 
   it("檔案超過字元上限：413", async () => {
     const res = await uploadRoute.POST(
-      jsonRequest(
-        "/api/corpus/upload",
-        { fileText: "a".repeat(2_097_153), contactLabel: "主管" },
-        cookie
-      )
+      jsonRequest("/api/corpus/upload", { fileText: "a".repeat(2_097_153) }, cookie)
     );
     expect(res.status).toBe(413);
   });
@@ -120,52 +105,74 @@ describe("POST /api/corpus/upload", () => {
   it("request body 超過位元組上限：413（在解析 JSON 之前就擋下）", async () => {
     // 9 MiB > 8 MiB 上限；fileText 的字元檢查根本輪不到就已回 413
     const res = await uploadRoute.POST(
-      jsonRequest(
-        "/api/corpus/upload",
-        { fileText: "a".repeat(9 * 1024 * 1024), contactLabel: "主管" },
-        cookie
-      )
+      jsonRequest("/api/corpus/upload", { fileText: "a".repeat(9 * 1024 * 1024) }, cookie)
     );
     expect(res.status).toBe(413);
   });
 
   it("格式無法辨識：400 + { error }", async () => {
     const res = await uploadRoute.POST(
-      jsonRequest("/api/corpus/upload", { fileText: "不是匯出檔", contactLabel: "主管" }, cookie)
+      jsonRequest("/api/corpus/upload", { fileText: "不是匯出檔" }, cookie)
     );
     expect(res.status).toBe(400);
     expect((await res.json()).error).toBeTruthy();
   });
 
-  it("happy path：200 + 匯入結果；重傳回 replaced=true", async () => {
+  it("categoryId 格式錯誤（非字串/null）：400", async () => {
     const res = await uploadRoute.POST(
-      jsonRequest("/api/corpus/upload", { fileText: EXPORT_FIXTURE, contactLabel: "主管" }, cookie)
+      jsonRequest("/api/corpus/upload", { fileText: EXPORT_FIXTURE, categoryId: 123 }, cookie)
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("categoryId 不存在：400", async () => {
+    const res = await uploadRoute.POST(
+      jsonRequest(
+        "/api/corpus/upload",
+        { fileText: EXPORT_FIXTURE, categoryId: "no-such" },
+        cookie
+      )
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("happy path：200 + 匯入結果（categoryId=null）；重傳回 replaced=true", async () => {
+    const res = await uploadRoute.POST(
+      jsonRequest("/api/corpus/upload", { fileText: EXPORT_FIXTURE }, cookie)
     );
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({
       sourceName: "王主管",
+      categoryId: null,
       sampleCount: 2,
       replaced: false,
     });
 
     const again = await uploadRoute.POST(
-      jsonRequest("/api/corpus/upload", { fileText: EXPORT_FIXTURE, contactLabel: "同事" }, cookie)
+      jsonRequest("/api/corpus/upload", { fileText: EXPORT_FIXTURE }, cookie)
     );
     expect((await again.json()).replaced).toBe(true);
   });
 
+  it("帶分類上傳：200，且清單回該分類名稱", async () => {
+    const categoryId = await createCategory("主管");
+    const res = await uploadRoute.POST(
+      jsonRequest("/api/corpus/upload", { fileText: EXPORT_FIXTURE, categoryId }, cookie)
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ sourceName: "王主管", categoryId });
+
+    const list = await listRoute.GET(getRequest("/api/corpus", cookie));
+    const body = await list.json();
+    expect(body.corpora[0]).toMatchObject({ categoryName: "主管" });
+  });
+
   it("超過每分鐘上限：429", async () => {
     for (let i = 0; i < 5; i++) {
-      await uploadRoute.POST(
-        jsonRequest(
-          "/api/corpus/upload",
-          { fileText: EXPORT_FIXTURE, contactLabel: "主管" },
-          cookie
-        )
-      );
+      await uploadRoute.POST(jsonRequest("/api/corpus/upload", { fileText: EXPORT_FIXTURE }, cookie));
     }
     const sixth = await uploadRoute.POST(
-      jsonRequest("/api/corpus/upload", { fileText: EXPORT_FIXTURE, contactLabel: "主管" }, cookie)
+      jsonRequest("/api/corpus/upload", { fileText: EXPORT_FIXTURE }, cookie)
     );
     expect(sixth.status).toBe(429);
   });
@@ -178,9 +185,7 @@ describe("GET /api/corpus", () => {
   });
 
   it("回本人語料清單", async () => {
-    await uploadRoute.POST(
-      jsonRequest("/api/corpus/upload", { fileText: EXPORT_FIXTURE, contactLabel: "主管" }, cookie)
-    );
+    await uploadRoute.POST(jsonRequest("/api/corpus/upload", { fileText: EXPORT_FIXTURE }, cookie));
     const res = await listRoute.GET(getRequest("/api/corpus", cookie));
     expect(res.status).toBe(200);
     const body = await res.json();
