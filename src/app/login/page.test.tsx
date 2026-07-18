@@ -58,9 +58,11 @@ describe("LoginPage — 表單狀態", () => {
 });
 
 describe("LoginPage — 送出", () => {
-  it("登入成功時以帳密呼叫 API 並導向聊天首頁", async () => {
+  it("登入成功且已有語料 → 導向聊天首頁", async () => {
     const user = userEvent.setup();
-    fetchMock.mockResolvedValueOnce(jsonResponse({ ok: true }));
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse({ corpora: [{ id: "c1" }] }));
 
     render(<LoginPage />);
     await fillCredentials(user);
@@ -76,6 +78,32 @@ describe("LoginPage — 送出", () => {
       username: "tingyu",
       password: "demo1234",
     });
+  });
+
+  it("登入成功但沒有語料 → 導向 /onboarding", async () => {
+    const user = userEvent.setup();
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse({ corpora: [] }));
+
+    render(<LoginPage />);
+    await fillCredentials(user);
+    await user.click(screen.getByRole("button", { name: "登入" }));
+
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/onboarding"));
+  });
+
+  it("語料檢查失敗時仍導向聊天首頁（引導失敗不阻擋登入）", async () => {
+    const user = userEvent.setup();
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockRejectedValueOnce(new Error("network down"));
+
+    render(<LoginPage />);
+    await fillCredentials(user);
+    await user.click(screen.getByRole("button", { name: "登入" }));
+
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/"));
   });
 
   it("伺服器回錯誤時顯示該錯誤訊息且不導頁", async () => {
@@ -136,6 +164,7 @@ describe("LoginPage — 送出", () => {
 
     expect(await screen.findByRole("button", { name: "登入中…" })).toBeDisabled();
 
+    fetchMock.mockResolvedValueOnce(jsonResponse({ corpora: [{ id: "c1" }] }));
     resolveLogin(jsonResponse({ ok: true }));
     await waitFor(() => expect(push).toHaveBeenCalledWith("/"));
   });
