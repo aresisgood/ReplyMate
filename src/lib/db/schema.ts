@@ -53,6 +53,8 @@ export const conversationSettings = sqliteTable(
       .notNull()
       .references(() => conversations.id),
     autoReply: integer("auto_reply", { mode: "boolean" }).notNull().default(false),
+    // 此對話代筆用的語料分類；null = 通用（全部語料）
+    styleCategoryId: text("style_category_id").references(() => styleCategories.id),
   },
   (t) => [uniqueIndex("conversation_settings_unique").on(t.userId, t.conversationId)]
 );
@@ -73,9 +75,23 @@ export const messages = sqliteTable(
   (t) => [index("messages_conversation_time_idx").on(t.conversationId, t.createdAt)]
 );
 
-// 使用者上傳 LINE 匯出檔後建立的風格語料。
-// contactLabel 標記語料來源的對話對象類型（主管/同事/朋友…），
-// Week 2 引擎依對象類型挑選 few-shot 範例。
+// 使用者自訂的語料分類。「通用」不是資料列——categoryId = null 即通用
+//（= 使用全部語料），故「通用」為保留名稱。
+export const styleCategories = sqliteTable(
+  "style_categories",
+  {
+    id: id(),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => users.id),
+    name: text("name").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("style_categories_owner_name_unique").on(t.ownerId, t.name)]
+);
+
+// 使用者上傳 LINE 匯出檔後建立的風格語料（使用者層級語氣樣本）。
+// sourceName 僅用於「重複上傳同一檔案整組取代」與清單顯示，不參與引擎比對。
 export const styleCorpora = sqliteTable(
   "style_corpora",
   {
@@ -83,7 +99,8 @@ export const styleCorpora = sqliteTable(
     ownerId: text("owner_id")
       .notNull()
       .references(() => users.id),
-    contactLabel: text("contact_label").notNull(),
+    // null = 通用（不屬於任何自訂分類）
+    categoryId: text("category_id").references(() => styleCategories.id),
     sourceName: text("source_name").notNull(), // 原始匯出檔中的對話對象名稱
     createdAt: createdAt(),
   },
