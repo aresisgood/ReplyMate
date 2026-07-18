@@ -35,6 +35,11 @@ describe("createCategory / listCategories", () => {
     expect(() => createCategory(db, ownerId, "一".repeat(21))).toThrow(ValidationError);
   });
 
+  it("長度以 Unicode code point 計——20 個 emoji（40 UTF-16 單位）可建立", () => {
+    expect(() => createCategory(db, ownerId, "😀".repeat(20))).not.toThrow();
+    expect(() => createCategory(db, ownerId, "😀".repeat(21))).toThrow(ValidationError);
+  });
+
   it("同 owner 重名 → ValidationError；不同 owner 可同名", () => {
     createCategory(db, ownerId, "主管");
     expect(() => createCategory(db, ownerId, "主管")).toThrow(ValidationError);

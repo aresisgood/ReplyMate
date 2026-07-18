@@ -22,7 +22,9 @@ function validateName(
   excludeId?: string
 ): string {
   const trimmed = name.trim();
-  if (trimmed.length === 0 || trimmed.length > MAX_NAME_CHARS) {
+  // 以 Unicode code point 計長：emoji 等 surrogate pair 算 1 字，而非 2
+  const charCount = [...trimmed].length;
+  if (charCount === 0 || charCount > MAX_NAME_CHARS) {
     throw new ValidationError(`分類名稱須為 1–${MAX_NAME_CHARS} 字`);
   }
   if (trimmed === RESERVED_NAME) {
