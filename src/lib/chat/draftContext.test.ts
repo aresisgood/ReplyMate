@@ -4,6 +4,8 @@ import { tables } from "../db";
 import type { AppDatabase } from "../db/types";
 import { buildDraftContext, RECENT_TURNS } from "./draftContext";
 import { ForbiddenError, NotFoundError } from "./queries";
+import { createCategory } from "../corpus/categories";
+import { setStyleCategoryId } from "./settings";
 
 let db: AppDatabase;
 let me: { id: string };
@@ -31,10 +33,15 @@ function message(senderId: string, text: string, atMs: number) {
     .get();
 }
 
-function seedCorpus(ownerId: string, contactLabel: string, sourceName: string, samples: string[]) {
+function seedCorpus(
+  ownerId: string,
+  sourceName: string,
+  samples: string[],
+  categoryId: string | null = null
+) {
   const corpus = db
     .insert(tables.styleCorpora)
-    .values({ ownerId, contactLabel, sourceName })
+    .values({ ownerId, sourceName, categoryId })
     .returning()
     .get();
   db.insert(tables.styleSamples)
@@ -62,8 +69,8 @@ beforeEach(() => {
   myOwnMessageId = message(me.id, "我自己說的話", T0 + 7000).id;
   incomingId = message(boss.id, "週六幫我看一下合約，急", T0 + 8000).id;
 
-  // 語料以對方 displayName「王主管」對應 sourceName
-  seedCorpus(me.id, "主管", "王主管", [
+  // 使用者層級語料，預設通用（categoryId = null）
+  seedCorpus(me.id, "王主管", [
     "好的，我今晚整理完寄給您",
     "了解，這部分我週三前處理好",
     "收到，我先確認一下細節再回覆您",
@@ -74,21 +81,43 @@ describe("buildDraftContext", () => {
   it("組出引擎所需的 BuildPromptInput", () => {
     const ctx = buildDraftContext(db, { messageId: incomingId, userId: me.id });
     expect(ctx.displayName).toBe("賴庭右");
-    expect(ctx.contactLabel).toBe("主管");
     expect(ctx.incomingText).toBe("週六幫我看一下合約，急");
   });
 
-  it("依對方 displayName 比對 sourceName 取出該語料的樣本", () => {
+  it("未設定分類（通用）時取得本人全部語料樣本", () => {
     const ctx = buildDraftContext(db, { messageId: incomingId, userId: me.id });
     expect(ctx.styleSamples.length).toBeGreaterThan(0);
     expect(ctx.styleSamples).toContain("好的，我今晚整理完寄給您");
   });
 
   it("只用「我」的語料——別人的語料不會被誤用", () => {
-    // outsider 也有一份對「王主管」的語料，但不該進到我的 prompt
-    seedCorpus(outsider.id, "主管", "王主管", ["這是路人的語氣，不該出現"]);
+    // outsider 也有一份語料，但不該進到我的 prompt
+    seedCorpus(outsider.id, "王主管", ["這是路人的語氣，不該出現"]);
     const ctx = buildDraftContext(db, { messageId: incomingId, userId: me.id });
     expect(ctx.styleSamples).not.toContain("這是路人的語氣，不該出現");
+  });
+
+  it("通用（未設定）：合併所有分類的樣本", () => {
+    const cat = createCategory(db, me.id, "朋友");
+    seedCorpus(me.id, "陳小美", ["晚點打給你"], cat.id);
+    const ctx = buildDraftContext(db, { messageId: incomingId, userId: me.id });
+    expect(ctx.styleSamples).toContain("好的，我今晚整理完寄給您");
+    expect(ctx.styleSamples).toContain("晚點打給你");
+  });
+
+  it("對話設了分類：只用該分類的樣本", () => {
+    const cat = createCategory(db, me.id, "朋友");
+    seedCorpus(me.id, "陳小美", ["晚點打給你"], cat.id);
+    setStyleCategoryId(db, me.id, convId, cat.id);
+    const ctx = buildDraftContext(db, { messageId: incomingId, userId: me.id });
+    expect(ctx.styleSamples).toEqual(["晚點打給你"]);
+  });
+
+  it("分類下沒有語料：不阻擋，styleSamples 為空", () => {
+    const cat = createCategory(db, me.id, "空分類");
+    setStyleCategoryId(db, me.id, convId, cat.id);
+    const ctx = buildDraftContext(db, { messageId: incomingId, userId: me.id });
+    expect(ctx.styleSamples).toEqual([]);
   });
 
   it("對話近況取最後 6 則、時間升冪，且不含這次的來訊", () => {
@@ -108,23 +137,11 @@ describe("buildDraftContext", () => {
     expect(theirs).toMatchObject({ isSelf: false, sender: "王主管" });
   });
 
-  it("找不到對應語料時不阻擋，styleSamples 為空（架構 §6：語料不足不阻擋）", () => {
-    const other = user("stranger", "陌生人");
-    const conv2 = db
-      .insert(tables.conversations)
-      .values({ userAId: me.id, userBId: other.id })
-      .returning()
-      .get();
-    const msg = db
-      .insert(tables.messages)
-      .values({ conversationId: conv2.id, senderId: other.id, text: "你好", createdAt: new Date(T0) })
-      .returning()
-      .get();
-
-    const ctx = buildDraftContext(db, { messageId: msg.id, userId: me.id });
+  it("使用者沒有任何語料時不阻擋，styleSamples 為空（架構 §6：語料不足不阻擋）", () => {
+    // boss 沒有任何語料，對我的訊息要求代筆時不該阻擋
+    const ctx = buildDraftContext(db, { messageId: myOwnMessageId, userId: boss.id });
     expect(ctx.styleSamples).toEqual([]);
-    expect(ctx.incomingText).toBe("你好");
-    expect(ctx.contactLabel).toBe("陌生人"); // 無語料時以對方名稱作為標籤
+    expect(ctx.incomingText).toBe("我自己說的話");
   });
 
   it("非對話參與者要求代筆 → ForbiddenError", () => {
